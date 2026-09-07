@@ -521,6 +521,21 @@ void VaClient::handle_text_(const char *data, size_t len) {
     return;
   }
 
+  // Out-of-band announcement (backend /announce endpoint, timer expiry). The
+  // backend sends this control frame right before it streams the announcement
+  // PCM as binary frames. Those frames are NOT part of any OpenAI reply, so the
+  // post-interrupt `suppress_incoming_audio_` gate (armed by send_interrupt(),
+  // lifted only on phase=listening) must not swallow them — without this, an
+  // announcement that arrives after a "stop"/button-cancelled reply returns
+  // HTTP 200 but plays nothing until the user next speaks to the device.
+  if (msg.find("\"type\":\"announce\"") != std::string::npos) {
+    if (this->suppress_incoming_audio_) {
+      this->suppress_incoming_audio_ = false;
+      ESP_LOGI(TAG, "incoming-audio suppression lifted for announcement");
+    }
+    return;
+  }
+
   // Substring match on `"value":"<phase>"` — keeps us out of a JSON parser
   // until M3 needs richer payloads.
   static const char *const kPhases[] = {"listening", "thinking", "replying", "idle"};
